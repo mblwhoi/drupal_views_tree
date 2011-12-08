@@ -1,0 +1,135 @@
+<?php
+
+/**
+ * Implementation of hook_views_api().
+ */
+function views_tree_views_api() {
+  return array(
+    'api' => '3.0-alpha1',
+    'path' => drupal_get_path('module', 'views_tree'),
+  );
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+function views_tree_theme($existing, $type, $theme, $path) {
+  return array(
+    'views_tree_inner' => array(
+      'arguments' => array(
+        'view' => NULL,
+        'options' => array(),
+        'rows' => array(),
+        'title' => NULL,
+        'result' => array(),
+        'parent' => NULL,
+      ),
+    ),
+  );
+}
+
+/**
+ * Theme function for the tree style plugin.
+ *
+ * We need to do some weirdness that makes more sense as a theme function
+ * than as a template.
+ *
+ * @ingroup themeable
+ * @link http://drupal.org/node/355919
+ */
+function theme_views_tree($view, $options, $rows, $title) {
+  $result = $view->result;
+  $fields = &$view->field;
+
+  $options['main_field_property'] = $fields[$options['main_field']]->field_alias;
+  $options['parent_field_property'] = $fields[$options['parent_field']]->field_alias;
+
+  // Normalize the top level of records to all point to 0 as their parent
+  // We only have to do this once, so we do it here in the wrapping function.
+  $parents = array();
+  foreach ($result as $record) {
+    $parents[] = $record->$options['main_field_property'];
+  }
+  foreach ($result as $record) {
+    if (! in_array($record->$options['parent_field_property'], $parents)) {
+      $record->$options['parent_field_property'] = 0;
+    }
+  }
+
+  if (!empty($options['collapsible_tree'])) {
+    drupal_add_js('misc/collapse.js');
+  }
+
+  return $title . theme('views_tree_inner', $view, $options, $rows, $title, $result, 0);
+}
+
+/**
+ * Inner recursive theme function for views tree theming.
+ *
+ * @ingroup themeable
+ * @param $view
+ * @param $options
+ * @param $row
+ * @param $title
+ * @param $result
+ *   An array representing the raw data returned from the query.
+ * @param $parent
+ *   The id of the parent entry in the call stack.
+ */
+function theme_views_tree_inner($view, $options, $rows, $title, $result, $parent = NULL) {
+  $items = array();
+  foreach ($result as $i => $record) {
+    if ($record->$options['parent_field_property'] === $parent) {
+      $children_count = _view_tree_count_children($result, $options, $record->$options['main_field_property']);
+      $children_data = call_user_func(__FUNCTION__, $view, $options, $rows, $title, $result, $record->$options['main_field_property']);
+      $label_values = (array)$record;
+      $label_values['children_count'] = $children_count;
+      $label = _tree_view_apply_values($options['collapsible_label'], $label_values);
+      if ($options['collapsible_tree'] == 'all') {
+        $items[] = "<fieldset class='collapsible collapsed'><legend>$label</legend><div id='fieldset-wrapper'>" . $rows[$i] . $children_data . "</div></fieldset>";
+      }
+      elseif (($children_count == 0) || (empty($options['collapsible_tree']))) {
+        $items[] = $rows[$i] . $children_data;
+      }
+      else {
+        $items[] = $rows[$i] . "<fieldset class='collapsible collapsed'><legend>$label</legend><div id='fieldset-wrapper'>$children_data</div></fieldset>";
+      }
+    }
+  }
+  return count($items) ? theme('item_list', $items, NULL, $options['type']) : '';
+}
+
+/**
+ * Encapsulate the specified key name in []
+ */
+function _tree_view_prepend_label_key($key_name) {
+  return "[$key_name]";
+}
+
+/**
+ * Given a label template and an associative array, find
+ * all occurances of %key_name for any 'key_name' in the
+ * provided array, and replace it with the respective key value.
+ *
+ * @param $label_template
+ *   A label template, such as "[profile_values_profile_full_name_value]'s direct reports: ([children_count])"
+ * @param $label_values
+ *   An associative array containing replacements for the template
+ */
+function _tree_view_apply_values($label_template, $label_values) {
+  return str_replace(array_map("_tree_view_prepend_label_key", array_keys($label_values)), array_values($label_values), $label_template);
+}
+
+/**
+ * Count all of the children nodes in a tree
+ */
+function _view_tree_count_children($result, $options, $parent) {
+  $count = 0;
+  
+  foreach ($result as $i => $record) {
+    if ($record->$options['parent_field_property'] === $parent) {
+      $count++;
+    }
+  }  
+  return $count;
+}

@@ -1,0 +1,116 @@
+diff --git a/views_tree.module b/views_tree.module
+index e237254..3230487 100644
+--- a/views_tree.module
++++ b/views_tree.module
+@@ -57,6 +57,10 @@ function theme_views_tree($view, $options, $rows, $title) {
+     }
+   }
+ 
++  if (!empty($options['collapsible_tree'])) {
++    drupal_add_js('misc/collapse.js');
++  }
++
+   return $title . theme('views_tree_inner', $view, $options, $rows, $title, $result, 0);
+ }
+ 
+@@ -76,9 +80,57 @@ function theme_views_tree($view, $options, $rows, $title) {
+ function theme_views_tree_inner($view, $options, $rows, $title, $result, $parent = NULL) {
+   $items = array();
+   foreach ($result as $i => $record) {
+-    if ($record->$options['parent_field_property'] == $parent) {
+-      $items[] = $rows[$i] . call_user_func(__FUNCTION__, $view, $options, $rows, $title, $result, $record->$options['main_field_property']);
++    if ($record->$options['parent_field_property'] === $parent) {
++      $children_count = _view_tree_count_children($result, $options, $record->$options['main_field_property']);
++      $children_data = call_user_func(__FUNCTION__, $view, $options, $rows, $title, $result, $record->$options['main_field_property']);
++      $label_values = (array)$record;
++      $label_values['children_count'] = $children_count;
++      $label = _tree_view_apply_values($options['collapsible_label'], $label_values);
++      if ($options['collapsible_tree'] == 'all') {
++        $items[] = "<fieldset class='collapsible collapsed'><legend>$label</legend><div id='fieldset-wrapper'>" . $rows[$i] . $children_data . "</div></fieldset>";
++      }
++      elseif (($children_count == 0) || (empty($options['collapsible_tree']))) {
++        $items[] = $rows[$i] . $children_data;
++      }
++      else {
++        $items[] = $rows[$i] . "<fieldset class='collapsible collapsed'><legend>$label</legend><div id='fieldset-wrapper'>$children_data</div></fieldset>";
++      }
+     }
+   }
+   return count($items) ? theme('item_list', $items, NULL, $options['type']) : '';
+ }
++
++/**
++ * Encapsulate the specified key name in []
++ */
++function _tree_view_prepend_label_key($key_name) {
++  return "[$key_name]";
++}
++
++/**
++ * Given a label template and an associative array, find
++ * all occurances of %key_name for any 'key_name' in the
++ * provided array, and replace it with the respective key value.
++ *
++ * @param $label_template
++ *   A label template, such as "[profile_values_profile_full_name_value]'s direct reports: ([children_count])"
++ * @param $label_values
++ *   An associative array containing replacements for the template
++ */
++function _tree_view_apply_values($label_template, $label_values) {
++  return str_replace(array_map("_tree_view_prepend_label_key", array_keys($label_values)), array_values($label_values), $label_template);
++}
++
++/**
++ * Count all of the children nodes in a tree
++ */
++function _view_tree_count_children($result, $options, $parent) {
++  $count = 0;
++  
++  foreach ($result as $i => $record) {
++    if ($record->$options['parent_field_property'] === $parent) {
++      $count++;
++    }
++  }  
++  return $count;
++}
+diff --git a/views_tree_plugin_style_tree.inc b/views_tree_plugin_style_tree.inc
+index 0a3207b..92750b9 100644
+--- a/views_tree_plugin_style_tree.inc
++++ b/views_tree_plugin_style_tree.inc
+@@ -44,6 +44,10 @@ class views_tree_plugin_style_tree extends views_plugin_style_list {
+     $events = array('click' => t('On Click'), 'mouseover' => t('On Mouseover'));
+ 
+     $form['type']['#description'] = t('Whether to use an ordered or unordered list for the retrieved items. Most use cases will prefer Unordered.');
++    
++    if (empty($this->options['collapsible_label'])) {
++      $this->options['collapsible_label'] = t('Children: ([children_count])');
++    }
+ 
+     $form['main_field'] = array(
+       '#type' => 'select',
+@@ -61,5 +65,25 @@ class views_tree_plugin_style_tree extends views_plugin_style_list {
+       '#default_value' => $this->options['parent_field'],
+       '#description' => t('Select the field that contains the unique identifier of the record\'s parent.'),
+     );
++    
++    $form['collapsible_tree'] = array(
++      '#type' => 'radios',
++      '#title' => t('Collapsible view'),
++      '#default_value' => $this->options['collapsible_tree'],
++      '#options' => array(
++        0 => t('Off'),
++        'all' => t('Collapse everything'),
++        'part' => t('Collapse children only'),
++      ),
++    );
++
++    $form['collapsible_label'] = array(
++      '#type' => 'textfield',
++      '#title' => t('Label for collapsible control'),
++      '#default_value' => $this->options['collapsible_label'],
++      '#description' => t('Label to display on the collapsible control.  May contain replacements <i>[fieldname]</i> for any field in the view, or [children_count].'),
++      '#size' => 70,
++      '#maxlength' => 250,
++    );
+   }
+ }
